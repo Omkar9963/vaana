@@ -1,0 +1,51 @@
+name: vaana-pages
+on:
+  schedule:
+    - cron: "15 */3 * * *"
+  workflow_dispatch: {}
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unpack Vaana from the zip
+        run: |
+          unzip -q -o vaana-platform.zip -d unpacked
+          cp -r unpacked/vaana/ingest unpacked/vaana/frontend .
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install -r ingest/requirements.txt
+      - name: Process newest ECMWF AIFS ENS run
+        working-directory: ingest
+        env:
+          VAANA_SOURCE: aifs
+          VAANA_OUT: ${{ github.workspace }}/site/data
+        run: python -m vaana_ingest.run --force
+      - name: Build website
+        run: |
+          python frontend/build.py
+          cp frontend/dist/index.html site/index.html
+          echo "window.VAANA_CONFIG = { dataUrl: 'data' };" > site/config.js
+          touch site/.nojekyll
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
